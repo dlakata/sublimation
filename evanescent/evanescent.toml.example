@@ -1,0 +1,58 @@
+# Copy to evanescent.toml to override defaults. CLI flags win over this file.
+# instance_type  = "g6e.xlarge"
+# model          = "qwen3.8:27b"
+# region         = "us-east-1"
+# volume_size    = 150
+
+# The window, and the floor under it. Both are sized from measurement rather than taste: a
+# heavy week's bundle is ~30k tokens, and the letter stage resumes the read's session, so its
+# prompt is that bundle plus the read. Two things sit above that number and both are set from
+# this one -- ollama truncates a prompt that will not fit num_ctx (silently; there is no
+# setting that makes it an error), and opencode replaces the diff with a summary once a prompt
+# passes `context_length - max(output, 20000)`. 131072 puts that second line at 98,304, which
+# a week cannot reach.
+# context_length = 131072
+# min_context    = 65536    # never launch a box that can serve less; 0 disables the floor
+
+# `instance_type` must name a rung of the ladder in evanescent.py -- an unlisted type has
+# unknown VRAM, so nothing can promise it serves the window, and `up` stops rather than guess.
+# The ladder is five single-L40S g6e sizes, then g5.12xlarge and g6.12xlarge (four 24GB cards
+# each) as a different pool of silicon for when L40S capacity is short region-wide. No single
+# 24GB card is on it: ~18GB of weights plus a 128K cache does not fit on one, and a rung that
+# quietly hands back a 32K window is the failure this whole arrangement exists to avoid.
+
+# The sampler, written into the Modelfile. Unset, these are whatever the model ships, and
+# qwen3.8:27b ships top_k 20, min_p 0 and repeat_penalty 1 (its temperature and top_p are already
+# 1.0 and 0.95). Twenty candidates a token is most of why a letter reads flat and keeps reaching
+# for the same figure.
+# top_k 0 turns that truncation off; min_p is the safety net that makes it safe, clamping hard
+# where the distribution is peaked (names, dates, syntax) and letting go where it is genuinely
+# flat (word choice, image). Keep repeat_penalty light — above ~1.1 it eats the repetition that
+# prose is actually built from.
+#
+# Changing any of these on a box that already exists takes `evanescent.py retune`, which is a
+# few seconds and no download. temperature and top_p are not here: they ride with the request,
+# set on the agent in petrograph's tools/weekly_review.py.
+# top_k          = 0
+# min_p          = 0.05
+# repeat_penalty = 1.05
+
+# Where `up` writes the `evanescent` provider block. opencode reads its config from the
+# working directory of whatever runs it, and petrograph runs it from the petrograph
+# checkout — so under sublimation that is what this points at. `just begin-sublimation`
+# passes it on the command line, and setting it here makes a bare `evanescent.py up` agree.
+# opencode_config = "../petrograph/opencode.json"
+
+# Whether the box is built to narrate as well as write. Unset means yes, which is what a week
+# wants. `false` — or `evanescent.py up --no-narration` — leaves ffmpeg and uv off the box, so
+# torch and the Chatterbox checkpoints are never fetched either and stage 4 has no engine. The
+# read and the letter are untouched: those are ollama, and ollama is installed either way.
+#
+# It is decided at the box's first boot and recorded in state, so changing it means a new box
+# rather than a `retune`. Worth it for a box that exists to be swept — `just experiment` and
+# `just ab` write letters nobody narrates — and worth ~40GB less volume with it.
+# narration = false
+
+# The volume holds three things now, not one: the ollama weights (~18GB), torch on the box
+# (~2.5GB) and the Chatterbox checkpoints (~2GB). 150 is comfortable; 100 is not — though a
+# `narration = false` box needs neither of the last two, and is comfortable at 60.

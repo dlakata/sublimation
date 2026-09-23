@@ -1,0 +1,276 @@
+# The sweep. Each block is one replay of the week; anything a block does not set is the value
+# `just sublimate` would have used, so "baseline" is the current pipeline and every other row
+# is that row's one change against it.
+#
+# Order in this file does not decide order of execution — experiment.py sorts by sampler so the
+# retunes come as rarely as the set allows. Name, not position, is what --only takes.
+
+# What every variant inherits unless it says otherwise: the pipeline as it ships today. Written
+# down here rather than read off the box, so that a row already in the book still matches itself
+# after some other variant has retuned — and so the baseline this sweep is measured against is a
+# property of the experiment rather than of whatever the box was last left tuned to.
+[defaults]
+top_k = 0
+min_p = 0.05
+repeat_penalty = 1.05
+temperature = 1.0
+top_p = 0.95
+effort = "max"
+
+# ── the pipeline as it ships ──────────────────────────────────────────────────────────────
+[[variant]]
+name = "baseline"
+note = "what `just sublimate` does today: top_k 0, min_p 0.05, repeat 1.05, temp 1.0, effort max"
+
+# ── the sampler ───────────────────────────────────────────────────────────────────────────
+# The docs call this the cheapest lever and the one that was never set. top_k 0 is already the
+# change that was made; these ask whether it went far enough, and whether min_p is carrying the
+# weight the README claims for it.
+[[variant]]
+name = "topk-20"
+note = "the value the model ships — the flat letter, reproduced deliberately as a floor"
+top_k = 20
+
+[[variant]]
+name = "minp-02"
+note = "let go of more of the tail; does variety arrive, or invented specifics?"
+min_p = 0.02
+
+[[variant]]
+name = "minp-10"
+note = "clamp harder — fewer names invented, at the cost of the figure"
+min_p = 0.10
+
+[[variant]]
+name = "repeat-110"
+note = "the top of the range the docs say is safe, above which it eats real repetition"
+repeat_penalty = 1.10
+
+# ── the request ───────────────────────────────────────────────────────────────────────────
+# Free to change: no rebuild, so these are the cheapest rows in the file.
+[[variant]]
+name = "temp-07"
+note = "a colder letter — fewer reaches, more of the distribution's own opinion"
+temperature = 0.7
+
+[[variant]]
+name = "temp-12"
+note = "hotter than the model ships"
+temperature = 1.2
+
+[[variant]]
+name = "topp-085"
+note = "nucleus tightened, with everything else held"
+top_p = 0.85
+
+# ── reasoning effort ──────────────────────────────────────────────────────────────────────
+[[variant]]
+name = "effort-low"
+note = "is `max` buying anything on a 27B, or only minutes?"
+effort = "low"
+
+# ── the prompts ───────────────────────────────────────────────────────────────────────────
+# Two axes crossed with two stages: the shipped ask given a shape, and the shipped ask told what
+# good looks like. Each row changes one prompt so the read and the letter can be attributed
+# separately — a letter is written in the session the read opened, so a better read improves the
+# letter for free, and a row that changed both could not tell you which did it.
+[[variant]]
+name = "read-structured"
+note = "the read prompt with an outline attached; the letter prompt untouched"
+read_prompt = "prompts/read-structured.md"
+
+[[variant]]
+name = "read-detailed"
+note = "the read prompt told what a good read does, written from the local model's failures"
+read_prompt = "prompts/read-detailed.md"
+
+[[variant]]
+name = "letter-structured"
+note = "the five parts spelled out, the addressee and length made explicit"
+compaction_prompt = "prompts/letter-structured.md"
+
+[[variant]]
+name = "letter-detailed"
+note = "the letter prompt told what separates a case from a summary"
+compaction_prompt = "prompts/letter-detailed.md"
+
+[[variant]]
+name = "both-detailed"
+note = "both detailed prompts — the ceiling of the prompt axis, to compare against its parts"
+read_prompt = "prompts/read-detailed.md"
+compaction_prompt = "prompts/letter-detailed.md"
+
+# ── conviction, and contesting what the week takes for granted ────────────────────────────
+# The 2026-09-09 sweep lost every analysis comparison, and in all thirty judge passes the named
+# reason was one property: the known-good took something the week reported as settled, said it
+# might not be, and handed over a step from outside the frame the week was written in. No
+# candidate did that. `judge.py` now scores it as its own dimension, `challenge`; these rows ask
+# what it costs to produce.
+#
+# All four are built on `read-detailed` rather than on the shipped prompt, because the read is
+# the stage the property belongs to and `read-detailed` is the register to keep — `read-structured`
+# scored higher but writes its opening as one long run-on thought, which is not what a better
+# score is wanted for. Each adds exactly one block to it, so a win decomposes.
+#
+# None of the four names the thing the known-good actually found. A prompt written against the
+# answer key would score well here and teach nothing about next week, which is the only week
+# any of this is for.
+[[variant]]
+name = "read-challenge"
+note = "contest one premise the week reports as weather — the property, asked for directly"
+read_prompt = "prompts/read-challenge.md"
+
+[[variant]]
+name = "read-conviction"
+note = "rank it and recommend once — is the gap nerve rather than contesting?"
+read_prompt = "prompts/read-conviction.md"
+
+[[variant]]
+name = "read-outside"
+note = "say what a field he is not consulting would say — the source, without naming it"
+read_prompt = "prompts/read-outside.md"
+
+[[variant]]
+name = "read-adversarial"
+note = "all three blocks — the ceiling of the new axis, to compare against its parts"
+read_prompt = "prompts/read-adversarial.md"
+
+[[variant]]
+name = "adversarial-and-letter"
+note = "the new read with the detailed letter, so a contested premise survives into narration"
+read_prompt = "prompts/read-adversarial.md"
+compaction_prompt = "prompts/letter-detailed.md"
+
+# ── what the reference sections are worth ─────────────────────────────────────────────────
+# example.md and metaphors.md are appended under --llm opencode and nowhere else. They were
+# added on the theory that a 27B needs shown what a 27B cannot infer; nothing has measured it.
+[[variant]]
+name = "no-references"
+note = "withhold the exemplar and the metaphor menu — what do the two sections buy?"
+references = false
+
+# ── the function of the symptom, and the temperature of the person saying it ───────────────
+# `adversarial-and-letter` won the 2026-09-09 sweep, and its read is what `just sublimate` asked
+# with until `read-proportion` took that place; its letter still ships.
+# Three things it still did not do, read off the known-good beside it rather than off its
+# scores, which said 83.5 and 85 and did not say what was missing:
+#
+#   1. It found a real pattern in the material and never asked what the material was doing for
+#      him — it described how a habit works and never said what would happen to him if it
+#      stopped. The known-good made the opposite move three times, each time reading a behaviour
+#      by what it is in service of and evidencing it from the order of events the week itself
+#      recorded. That is not a harder `insight`; it is a different question asked of the same
+#      paragraph.
+#   2. It is cold. It opens by prosecuting him, keeps that up for two thousand words, and
+#      nowhere says that anything he did that week was any good — and scored full marks on
+#      `register` for it, the rubric rewarding nerve and unable to tell someone unafraid of him
+#      from someone against him.
+#   3. Its letter kept the read's one outside-frame step, but thinly, and thinly is the general
+#      failure: that item is the most valuable thing in the read and the most compressible, and
+#      once compressed into a sentence reporting that a recommendation was made, nobody can act
+#      on it.
+#
+# So: two new read blocks and one new letter block, each row adding exactly one of them to the
+# shipped pair, and the last two rows crossing them. `judge.py` scores all three as their own
+# dimensions — `function`, `warmth`, `carry` — which moves the rubric hash and marks every row
+# above as graded under an older one until `--judge` re-earns it. That re-judging costs Claude
+# calls and not box time; only the five rows below need the box.
+#
+# None of the three blocks names what the known-good actually found. Same reasoning as the rows
+# above: a prompt written against the answer key scores well on the week it was written from and
+# teaches nothing about next week.
+[[variant]]
+name = "read-function"
+note = "what the anxiety is for, not what it is about — the move, asked for without its answers"
+read_prompt = "prompts/read-function.md"
+compaction_prompt = "prompts/letter-detailed.md"
+
+[[variant]]
+name = "read-warmth"
+note = "the same nerve, from affection — does the hard finding survive being kind?"
+read_prompt = "prompts/read-warmth.md"
+compaction_prompt = "prompts/letter-detailed.md"
+
+[[variant]]
+name = "read-complete"
+note = "both new blocks on the shipped read — the ceiling of the new read axis"
+read_prompt = "prompts/read-complete.md"
+compaction_prompt = "prompts/letter-detailed.md"
+
+[[variant]]
+name = "letter-carry"
+note = "the shipped read, with the letter told which finding has to survive compaction"
+read_prompt = "prompts/read-adversarial.md"
+compaction_prompt = "prompts/letter-carry.md"
+
+[[variant]]
+name = "complete-and-carry"
+note = "both new blocks and the carrying letter — the row to ship if it wins"
+read_prompt = "prompts/read-complete.md"
+compaction_prompt = "prompts/letter-carry.md"
+
+# ── the second generation: two known-good weeks, and the rows still worth the box ──────────
+# `read-complete` and `complete-and-carry` took the 2026-09-09 sweep on the read, which is the
+# stage that decides the other one — a letter is written in the session the read opened and
+# cannot be better than what it compacts, so `experiment.py` now weights the read at 0.6 and
+# the letter at 0.4 rather than averaging them.
+#
+# Everything below is one change against `complete-and-carry`, which is `read-complete.md` with
+# `letter-carry.md`, and which the rows above establish as the pair to beat. Read the new
+# sweep with `--previous .sublimation/experiments/2026-09-09 --top 5`: the five best rows above
+# are re-run beside these against both weeks, and the other twenty are dropped before the box
+# is touched, because their numbers are already in and they were not close.
+#
+# Three things the 2026-09-09 known-good did that nothing in that sweep did, read off the
+# documents rather than off the scores:
+#
+#   1. It gave a section of its own to the week's hottest passage — read as the peak of a bad
+#      hour rather than as a conclusion, with what it was answering and how long the state
+#      lasted. Not one of the twenty-five candidates did that at either stage, and the table's
+#      top row was an 83, which is a rubric measuring craft and calling it quality. `judge.py`
+#      now scores `proportion` at both stages.
+#   2. It took repairs he had designed himself and amended them in place — his version, the
+#      flaw, a better version — rather than praising them or proposing something instead.
+#   3. It counted where the week's feeling actually terminated, and said that acceptance does
+#      not arrive in one decisive transaction.
+#
+# And one thing the winning *letters* did badly enough to hear: the best analysis in the sweep
+# came with a letter averaging 39.8-word sentences in 267-word paragraphs, against the
+# known-good's 16.4 and 79.5. It scored 3.0 on `speakable` and won its stage anyway. That half
+# gets narrated to somebody with no page in front of them. `scorecard.py` now counts sentence
+# and paragraph length on every run, free and before the judge is asked.
+#
+# As with the generation above, none of the new blocks names what either known-good actually
+# found — each asks for the move and says what to do if the week does not contain one. That
+# discipline is now testable rather than merely asserted: two weeks are scored, and a row that
+# was written against one of them pays for the difference between them in the `score` column.
+
+[[variant]]
+name = "read-proportion"
+note = "the block every variant in the last sweep needed and none had — the worst hour, in proportion"
+read_prompt = "prompts/read-proportion.md"
+compaction_prompt = "prompts/letter-carry.md"
+
+[[variant]]
+name = "read-repair"
+note = "his own fixes amended rather than replaced — challenge aimed at his work, not his week"
+read_prompt = "prompts/read-repair.md"
+compaction_prompt = "prompts/letter-carry.md"
+
+[[variant]]
+name = "read-widen"
+note = "where the week's feeling terminates, and the smallest widening available"
+read_prompt = "prompts/read-widen.md"
+compaction_prompt = "prompts/letter-carry.md"
+
+[[variant]]
+name = "letter-narrated"
+note = "the winning read, with a letter told the cadence — does readability cost the findings?"
+read_prompt = "prompts/read-complete.md"
+compaction_prompt = "prompts/letter-narrated.md"
+
+[[variant]]
+name = "read-ceiling"
+note = "all three read blocks and the speakable letter — the row to ship if it beats its parts"
+read_prompt = "prompts/read-ceiling.md"
+compaction_prompt = "prompts/letter-narrated.md"

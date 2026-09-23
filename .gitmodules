@@ -1,0 +1,4 @@
+[submodule "petrograph"]
+	path = petrograph
+	url = https://github.com/altosaar/petrograph.git
+	branch = main

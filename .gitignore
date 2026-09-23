@@ -1,0 +1,30 @@
+# The box's state, and its private key. The key is the reason this line is first.
+evanescent/.evanescent/
+evanescent/evanescent.toml
+evanescent/.venv/
+*.pem
+
+# The ssh control socket and the boot log. Per-machine, per-box, and worthless off this one.
+.sublimation/
+
+# The two petrograph files that are yours rather than the repo's; `just setup` symlinks them
+# into the submodule from a clone you already have. As a submodule its contents are not this
+# repo's to track and petrograph gitignores them anyway — these lines are for the day someone
+# replaces the submodule with a plain directory and git starts looking inside it.
+petrograph/.env
+petrograph/providers.conf
+petrograph/opencode.json
+
+# The standing answers — which bed plays under the narration, and whatever else this file
+# grows. Gitignored because it names files on this disk; sublimation.example.conf is tracked.
+sublimation.conf
+
+# The reference clip the narrator clones, which is a recording of a person saying something.
+# `just voice` puts it here; it is not this repo's to publish, any more than the sessions are.
+voices/
+
+# The archive: every week's diff, letter and audio. Real therapy-adjacent notes, real
+# finances, real physiology — this is the most private thing here and it is never committed.
+sessions/
+
+__pycache__/

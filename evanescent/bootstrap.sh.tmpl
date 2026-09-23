@@ -1,0 +1,184 @@
+#!/bin/bash
+# Bootstrap for an evanescent box: install Ollama, pull the model, arm the idle
+# watchdog. Placeholders (@@NAME@@) are substituted by evanescent.py before upload.
+#
+# Runs once, via cloud-init user-data. On later stop/start cycles nothing here
+# re-runs -- ollama.service is enabled, so systemd brings it back on its own.
+set -euo pipefail
+
+# cloud-init runs user-data as root with no HOME in the environment, and the
+# ollama CLI panics in envconfig.Models() when it cannot resolve one.
+export HOME=/root
+
+STATE=/opt/evanescent
+LOG=/var/log/evanescent-bootstrap.log
+mkdir -p "$STATE"
+exec > >(tee -a "$LOG") 2>&1
+
+trap 'echo "=== BOOTSTRAP FAILED (line $LINENO) ==="; touch "$STATE/FAILED"' ERR
+
+echo "=== evanescent bootstrap started $(date -Is) ==="
+nvidia-smi || echo "WARNING: nvidia-smi unavailable"
+
+echo
+echo "--- [1/5] installing ollama"
+curl -fsSL https://ollama.com/install.sh | sh
+
+# qwen3.8 is a hybrid attention/SSM architecture that older Ollama cannot load; its
+# manifest declares "requires": 0.32.12. install.sh always fetches latest, so this
+# only fires if the install itself went sideways -- but failing here, loudly, beats
+# a confusing runtime error on the first request.
+MIN_OLLAMA=@@MIN_OLLAMA@@
+have=$(ollama --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+if [ -n "$have" ] && [ "$(printf '%s\n%s\n' "$MIN_OLLAMA" "$have" | sort -V | head -1)" != "$MIN_OLLAMA" ]; then
+  echo "ollama $have is older than $MIN_OLLAMA, which @@MODEL@@ requires"
+  exit 1
+fi
+echo "ollama version ${have:-unknown} (need >= $MIN_OLLAMA)"
+
+echo
+echo "--- [2/5] configuring ollama"
+# Weights live on the root EBS volume so they survive stop/start.
+install -d -o ollama -g ollama /opt/ollama/models
+mkdir -p /etc/systemd/system/ollama.service.d
+cat > /etc/systemd/system/ollama.service.d/evanescent.conf <<'CONF'
+[Service]
+# Loopback only -- reachable solely through the SSH tunnel.
+Environment="OLLAMA_HOST=127.0.0.1:11434"
+# Ollama's stock context default is ~4K, which silently truncates opencode's
+# context and makes the model look broken. This is the important line: a whole
+# journal's worth of input is the point, and a truncated window loses the
+# beginning of it without saying so.
+#
+# "Without saying so" is not a figure of speech and it is not fixable from here.
+# There is no server setting that makes an over-length prompt an error instead of
+# a truncation: the /api/* endpoints take a per-request `truncate: false`, and the
+# OpenAI-compatible /v1/chat/completions that opencode speaks has no field for it.
+# All the daemon leaves behind is a `truncating input prompt` line in this journal,
+# which is why `evanescent.py status` greps for one. The actual defence is upstream
+# -- a window nothing a week produces can fill -- and it is arithmetic, not hope:
+# see the note on `context_length` in evanescent.py.
+#
+# Note also that the Modelfile's `PARAMETER num_ctx` below outranks this variable,
+# and a request's own `options.num_ctx` would outrank both. Both are set to the same
+# number on purpose; if they ever disagree, the Modelfile is what the model gets.
+Environment="OLLAMA_CONTEXT_LENGTH=@@CONTEXT_LENGTH@@"
+Environment="OLLAMA_FLASH_ATTENTION=1"
+# The 4-GPU rungs of the fallback ladder (g5.12xlarge, g6.12xlarge) are four 24GB
+# cards, and ~18GB of weights plus a 128K cache does not fit on one of them. Ollama
+# would split across two and sit near the edge of both; this spreads the layers over
+# all four instead, which is where the headroom is. It is a no-op on the single-L40S
+# rungs, where there is one GPU to schedule onto.
+Environment="OLLAMA_SCHED_SPREAD=1"
+# Halves KV cache memory, which is what buys us the 256K context on one L40S:
+# ~32KB/token instead of ~64KB, so a full window is ~8GB rather than ~16GB.
+Environment="OLLAMA_KV_CACHE_TYPE=@@KV_CACHE_TYPE@@"
+# Reloading 18GB from disk between prompts is a bad time.
+Environment="OLLAMA_KEEP_ALIVE=@@KEEP_ALIVE@@"
+# Single user: give the whole context budget to one slot instead of splitting it.
+Environment="OLLAMA_NUM_PARALLEL=1"
+Environment="OLLAMA_MODELS=/opt/ollama/models"
+CONF
+systemctl daemon-reload
+systemctl enable --now ollama
+
+echo "--- waiting for ollama to answer"
+for _ in $(seq 1 90); do
+  if curl -sf http://127.0.0.1:11434/api/version >/dev/null; then break; fi
+  sleep 2
+done
+curl -sf http://127.0.0.1:11434/api/version || { echo "ollama never came up"; exit 1; }
+
+echo
+echo "--- [3/5] pulling @@MODEL@@ (the slow part, ~18GB)"
+ollama pull '@@MODEL@@'
+
+echo
+echo "--- [4/5] deriving @@DERIVED_MODEL@@ with num_ctx=@@CONTEXT_LENGTH@@"
+# Belt and braces: OLLAMA_CONTEXT_LENGTH covers modern Ollama, this pins it
+# regardless of version. Reuses the same blobs (including the vision projector)
+# -- no second 18GB on disk.
+cat > "$STATE/Modelfile" <<'MF'
+FROM @@MODEL@@
+PARAMETER num_ctx @@CONTEXT_LENGTH@@
+@@SAMPLER@@
+MF
+ollama create '@@DERIVED_MODEL@@' -f "$STATE/Modelfile"
+
+echo
+echo "--- [5/6] narration prerequisites"
+@@NARRATION@@
+
+echo
+echo "--- [6/6] idle watchdog"
+IDLE_MINUTES=@@IDLE_MINUTES@@
+if [ "$IDLE_MINUTES" -gt 0 ]; then
+  cat > /usr/local/bin/evanescent-idle-check <<'CHECK'
+#!/bin/bash
+# Stop the instance when nothing has used it for a while. Paired with the
+# instance's shutdown-behavior=stop, so this halts rather than terminates and
+# the model weights survive on EBS.
+IDLE_MINUTES=@@IDLE_MINUTES@@
+
+# Never fire mid-bootstrap.
+[ -f /opt/evanescent/READY ] || exit 0
+
+# 1. Recent API traffic in ollama's journal?
+if journalctl -u ollama --since "${IDLE_MINUTES} minutes ago" -q 2>/dev/null \
+     | grep -qE '/(api|v1)/'; then
+  exit 0
+fi
+# 2. Anyone currently connected to ollama (an in-flight request)?
+if ss -tnH state established '( sport = :11434 or dport = :11434 )' 2>/dev/null | grep -q .; then
+  exit 0
+fi
+# 3. An interactive SSH session? (`ssh -N` port-forwards have no tty and do not
+#    count -- an open-but-unused tunnel is idle.)
+if who 2>/dev/null | grep -q .; then
+  exit 0
+fi
+# 4. A narration in flight? This is the one check that is not about ollama, and without it
+#    a long render is invisible to all three above: it generates no ollama traffic, holds no
+#    connection to 11434, and arrives over a non-interactive `ssh host cmd`, which writes no
+#    utmp entry for `who` to find. A forty-minute letter would be stopped in the middle of
+#    itself at the forty-fifth idle minute.
+#
+#    A running process rather than a lock file, deliberately. A lock file that outlives the
+#    thing that made it disarms the watchdog until the next reboot, which is the failure this
+#    whole timer exists to prevent; a pgrep cannot go stale.
+if pgrep -f 'chatterbox_tts\.py' >/dev/null 2>&1; then
+  exit 0
+fi
+
+logger -t evanescent "idle ${IDLE_MINUTES}m with no ollama traffic -- stopping instance"
+echo "$(date -Is) idle shutdown" >> /var/log/evanescent-bootstrap.log
+/sbin/shutdown -h now
+CHECK
+  chmod +x /usr/local/bin/evanescent-idle-check
+
+  cat > /etc/systemd/system/evanescent-idle.service <<'UNIT'
+[Unit]
+Description=Evanescent idle shutdown check
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/evanescent-idle-check
+UNIT
+  cat > /etc/systemd/system/evanescent-idle.timer <<'UNIT'
+[Unit]
+Description=Run the evanescent idle check every 5 minutes
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+[Install]
+WantedBy=timers.target
+UNIT
+  systemctl daemon-reload
+  systemctl enable --now evanescent-idle.timer
+  echo "watchdog armed: stops after ${IDLE_MINUTES} idle minutes"
+else
+  echo "watchdog DISABLED (--idle-minutes 0) -- this box will run until you stop it"
+fi
+
+echo
+echo "=== evanescent bootstrap finished $(date -Is) ==="
+touch "$STATE/READY"
